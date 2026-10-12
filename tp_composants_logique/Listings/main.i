@@ -5,6 +5,7 @@
 # 1 "<command line>" 1
 # 1 "<built-in>" 2
 # 1 "main.c" 2
+# 11 "main.c"
 # 1 "C:/Users/elkat/AppData/Local/Arm/Packs/Keil/STM32F1xx_DFP/2.4.1/Device/Include\\stm32f10x.h" 1
 # 105 "C:/Users/elkat/AppData/Local/Arm/Packs/Keil/STM32F1xx_DFP/2.4.1/Device/Include\\stm32f10x.h"
 # 1 "./RTE/_Target_1\\RTE_Components.h" 1
@@ -1863,163 +1864,597 @@ typedef struct
   volatile uint32_t CFR;
   volatile uint32_t SR;
 } WWDG_TypeDef;
-# 2 "main.c" 2
-
-
+# 12 "main.c" 2
+# 37 "main.c"
 typedef enum
 {
     GPIO_INPUT_ANALOG = 0x0,
+    GPIO_INPUT_FLOATING = 0x4,
+    GPIO_INPUT_PULL = 0x8,
     GPIO_OUTPUT_PP_10MHZ = 0x1,
     GPIO_OUTPUT_PP_2MHZ = 0x2,
     GPIO_OUTPUT_PP_50MHZ = 0x3,
-
-    GPIO_INPUT_FLOATING = 0x4,
     GPIO_OUTPUT_OD_10MHZ = 0x5,
     GPIO_OUTPUT_OD_2MHZ = 0x6,
     GPIO_OUTPUT_OD_50MHZ = 0x7,
-
-    GPIO_INPUT_PULL = 0x8,
-
     GPIO_AF_PP_10MHZ = 0x9,
     GPIO_AF_PP_2MHZ = 0xA,
     GPIO_AF_PP_50MHZ = 0xB,
-
     GPIO_AF_OD_10MHZ = 0xD,
     GPIO_AF_OD_2MHZ = 0xE,
     GPIO_AF_OD_50MHZ = 0xF
-
 } GPIO_Config_t;
 
 typedef enum
 {
     GPIO_LOW = 0,
     GPIO_HIGH = 1
-
 } GPIO_State_t;
 
-void GPIO_InitPin(GPIO_TypeDef *GPIOx, uint8_t pin, GPIO_Config_t config, GPIO_State_t defaultState)
+
+static volatile uint8_t MaeRcp = 0;
+static volatile uint8_t entete = 0;
+static volatile uint8_t octets_recus[4];
+static volatile uint8_t commande_casiers[4];
+static volatile uint8_t commande_zif[4];
+static volatile uint8_t casiers_prets = 0;
+static volatile uint8_t zif_pret = 0;
+
+
+static uint8_t Fifo[16U];
+static uint8_t IwFifo = 0;
+static uint8_t IrFifo = 0;
+static uint8_t FifoLibre = 16U;
+static volatile uint8_t pcfs_initialises = 0;
+
+static const uint8_t adresses_leds[2U] = {
+    ((0x2 << 4) | 0b000), ((0x2 << 4) | 0b001)};
+
+
+void GPIO_InitPin(GPIO_TypeDef *port, uint8_t pin,
+                  GPIO_Config_t config, GPIO_State_t etat)
 {
-    uint32_t shift;
+    volatile uint32_t *registre;
+    uint32_t decalage;
+    uint32_t masque;
 
-    if (pin > 15)
+    if (pin > 15U || (uint32_t)config > 15U)
         return;
 
-
-
-
-
-    if (GPIOx == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800)))
-    {
+    if (port == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800)))
         ((RCC_TypeDef *) ((((uint32_t)0x40000000) + 0x20000) + 0x1000))->APB2ENR |= ((uint32_t)0x00000004);
-    }
-    else if (GPIOx == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)))
-    {
+    else if (port == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)))
         ((RCC_TypeDef *) ((((uint32_t)0x40000000) + 0x20000) + 0x1000))->APB2ENR |= ((uint32_t)0x00000008);
-    }
-    else if (GPIOx == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x1000)))
-    {
+    else if (port == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x1000)))
         ((RCC_TypeDef *) ((((uint32_t)0x40000000) + 0x20000) + 0x1000))->APB2ENR |= ((uint32_t)0x00000010);
-    }
-    else if (GPIOx == ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x1400)))
-    {
-        ((RCC_TypeDef *) ((((uint32_t)0x40000000) + 0x20000) + 0x1000))->APB2ENR |= ((uint32_t)0x00000020);
-    }
     else
-    {
         return;
-    }
+
+    registre = (pin < 8U) ? &port->CRL : &port->CRH;
+    decalage = ((uint32_t)pin % 8U) * 4U;
+    masque = 0xFU << decalage;
 
 
 
-
-
-    if (defaultState == GPIO_HIGH)
+    if (config == GPIO_INPUT_PULL)
     {
-        GPIOx->BSRR = (1U << pin);
+        *registre = (*registre & ~masque) | (0x4U << decalage);
     }
+
+    if (etat == GPIO_HIGH)
+        port->BSRR = 1U << pin;
     else
-    {
-        GPIOx->BRR = (1U << pin);
-    }
+        port->BRR = 1U << pin;
 
-
-
-
-
-    if (pin < 8)
-    {
-        shift = pin * 4;
-
-        GPIOx->CRL &= ~(0xFU << shift);
-        GPIOx->CRL |= ((uint32_t)config << shift);
-    }
-    else
-    {
-        shift = (pin - 8) * 4;
-
-        GPIOx->CRH &= ~(0xFU << shift);
-        GPIOx->CRH |= ((uint32_t)config << shift);
-    }
+    *registre = (*registre & ~masque) | ((uint32_t)config << decalage);
 }
 
-void delay_ms(uint32_t ms)
+static void GPIO_Ecrire(GPIO_TypeDef *port, uint8_t pin, uint8_t niveau)
+{
+    if (niveau)
+        port->BSRR = 1U << pin;
+    else
+        port->BRR = 1U << pin;
+}
+
+
+static void delay_us(uint32_t us)
 {
     uint32_t ticks;
+    if (us == 0U)
+        return;
+    ticks = (SystemCoreClock / 1000000U) * us;
+    if (ticks == 0U || ticks > 0x1000000U)
+        return;
 
-
-
-
-
-    ticks = SystemCoreClock / 1000U;
-
-
-
-
-
+    ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL = 0U;
     ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->LOAD = ticks - 1U;
-
-
-
-
     ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->VAL = 0U;
-
-
-
-
-
-
-    ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL = (1UL << 2U) |
-                    (1UL );
-
-    while (ms > 0U)
+    ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL = (1UL << 2U) | (1UL );
+    while ((((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL & (1UL << 16U)) == 0U)
     {
+    }
+    ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL = 0U;
+}
+void delay_ms(uint32_t ms)
+{
+    for (uint32_t i = 0; i < ms; i++)
+    {
+        delay_us(1000);
+    }
+}
 
 
 
 
-        if (((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL & (1UL << 16U))
+static void ZIF_Config(uint16_t directions, uint16_t niveaux)
+{
+    uint8_t i;
+    GPIO_TypeDef *port;
+    uint8_t pin;
+
+
+    for (i = 0; i < 16U; i++)
+    {
+        port = (i < 8U) ? ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x1000)) : ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00));
+        pin = i;
+        GPIO_InitPin(port, pin, GPIO_INPUT_FLOATING, GPIO_LOW);
+    }
+
+    for (i = 0; i < 16U; i++)
+    {
+        port = (i < 8U) ? ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x1000)) : ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00));
+        pin = i;
+        if (directions & (1U << i))
         {
-            ms--;
+            GPIO_InitPin(port, pin, GPIO_INPUT_PULL,
+                         (niveaux & (1U << i)) ? GPIO_HIGH : GPIO_LOW);
         }
+        else
+        {
+            GPIO_InitPin(port, pin, GPIO_OUTPUT_PP_2MHZ,
+                         (niveaux & (1U << i)) ? GPIO_HIGH : GPIO_LOW);
+        }
+    }
+}
+
+static uint16_t ZIF_Lire(void)
+{
+    uint16_t broches_PC = (uint16_t)(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x1000))->IDR & 0x00FFU);
+    uint16_t broches_PB = (uint16_t)(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00))->IDR & 0xFF00U);
+    return (uint16_t)(broches_PB | broches_PC);
+}
+
+
+static uint8_t ZIF_DirectionsValides(uint16_t directions)
+{
+    uint8_t sorties = 0;
+    uint8_t i;
+    for (i = 0; i < 16U; i++)
+    {
+        if ((directions & (1U << i)) == 0U)
+            sorties++;
+    }
+    return (uint8_t)(sorties <= 2U);
+}
+
+
+static void I2C_Init(void)
+{
+
+    GPIO_InitPin(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, GPIO_OUTPUT_OD_2MHZ, GPIO_HIGH);
+    GPIO_InitPin(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, GPIO_OUTPUT_OD_2MHZ, GPIO_HIGH);
+}
+
+static void I2C_Start(void)
+{
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, 1);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 1);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, 0);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 0);
+}
+
+static void I2C_Stop(void)
+{
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, 0);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 1);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, 1);
+    delay_us(5);
+}
+
+static void I2C_EcrireBit(uint8_t bit)
+{
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, bit);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 1);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 0);
+    delay_us(5);
+}
+
+static uint8_t I2C_LireBit(void)
+{
+    uint8_t bit;
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 7U, 1);
+    delay_us(5);
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 1);
+    delay_us(5);
+    bit = (((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00))->IDR & (1U << 7U)) ? 1U : 0U;
+    GPIO_Ecrire(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0C00)), 6U, 0);
+    delay_us(5);
+    return bit;
+}
+
+
+static uint8_t I2C_EcrireOctet(uint8_t valeur)
+{
+    int8_t i;
+    for (i = 7; i >= 0; i--)
+        I2C_EcrireBit((uint8_t)((valeur >> i) & 1U));
+    return (uint8_t)(I2C_LireBit() == 0U);
+}
+
+
+static uint8_t I2C_LireOctet(void)
+{
+    uint8_t valeur = 0;
+    uint8_t i;
+    for (i = 0; i < 8U; i++)
+        valeur = (uint8_t)((valeur << 1) | I2C_LireBit());
+    I2C_EcrireBit(1);
+    return valeur;
+}
+
+static uint8_t PCF_Ecrire(uint8_t adresse, uint8_t valeur)
+{
+    uint8_t ok;
+    I2C_Start();
+    ok = I2C_EcrireOctet((uint8_t)(adresse << 1));
+    if (ok)
+        ok = I2C_EcrireOctet(valeur);
+    I2C_Stop();
+    return ok;
+}
+
+static uint8_t PCF_Lire(uint8_t adresse, uint8_t *valeur)
+{
+    uint8_t ok;
+    I2C_Start();
+    ok = I2C_EcrireOctet((uint8_t)((adresse << 1) | 1U));
+    if (ok)
+        *valeur = I2C_LireOctet();
+    I2C_Stop();
+    return ok;
+}
+
+
+static uint8_t Casiers_Initialiser(void)
+{
+    uint8_t i;
+    uint8_t ok = 1;
+    for (i = 0; i < 2U; i++)
+        if (!PCF_Ecrire(adresses_leds[i], 0xFFU))
+            ok = 0;
+
+
+    if (!PCF_Ecrire(((0x2 << 4) | 0b011), 0b11111111))
+        ok = 0;
+    return ok;
+}
+
+
+
+
+static uint8_t LEDs_CalculerOctet(uint8_t numero_pcf,
+                                  uint16_t vertes, uint16_t rouges)
+{
+    uint8_t etat = 0xFFU;
+    uint8_t position;
+
+    for (position = 0; position < 3U; position++)
+    {
+        uint8_t numero_led = numero_pcf * 3U + position;
+        uint8_t bit_rouge = position * 2U;
+        uint8_t bit_vert = bit_rouge + 1U;
+        if (numero_led >= 6U)
+            break;
+        if (rouges & (1U << numero_led))
+            etat &= (uint8_t)~(1U << bit_rouge);
+        if (vertes & (1U << numero_led))
+            etat &= (uint8_t)~(1U << bit_vert);
+    }
+    return etat;
+}
+
+
+
+static uint8_t Casiers_LEDs(uint16_t vertes, uint16_t rouges)
+{
+    uint8_t i;
+    uint8_t ok = 1;
+
+    for (i = 0; i < 2U; i++)
+    {
+        uint8_t octet = LEDs_CalculerOctet(i, vertes, rouges);
+        if (!PCF_Ecrire(adresses_leds[i], octet))
+            ok = 0;
+    }
+    return ok;
+}
+
+
+static uint8_t Casiers_Lire(uint16_t *etat)
+{
+    uint8_t bas;
+
+    if (!PCF_Lire(((0x2 << 4) | 0b011), &bas))
+        return 0;
+
+    *etat = (uint16_t)bas;
+
+    return 1;
+}
+
+static void UART_Init(void)
+{
+    uint32_t pclk1;
+    uint32_t apb1;
+    SystemCoreClockUpdate();
+    ((RCC_TypeDef *) ((((uint32_t)0x40000000) + 0x20000) + 0x1000))->APB1ENR |= ((uint32_t)0x00020000);
+    GPIO_InitPin(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800)), 2, GPIO_AF_PP_2MHZ, GPIO_HIGH);
+    GPIO_InitPin(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800)), 3, GPIO_INPUT_FLOATING, GPIO_HIGH);
+
+
+    apb1 = (((RCC_TypeDef *) ((((uint32_t)0x40000000) + 0x20000) + 0x1000))->CFGR >> 8) & 7U;
+    pclk1 = SystemCoreClock;
+    if (apb1 >= 4U)
+        pclk1 >>= (apb1 - 3U);
+
+    ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->CR1 = 0U;
+    ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->CR2 = 0U;
+    ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->CR3 = 0U;
+    ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->BRR = (pclk1 + 9600U / 2U) / 9600U;
+    ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->CR1 = ((uint16_t)0x2000) | ((uint16_t)0x0008) | ((uint16_t)0x0004) |
+                  ((uint16_t)0x0020);
+    __NVIC_EnableIRQ(USART2_IRQn);
+}
+
+
+static uint8_t Reception_Reconstituer(uint8_t octet, uint8_t numero)
+{
+    return (uint8_t)((octet & 0x7FU) |
+                     (((entete >> numero) & 1U) << 7));
+}
+
+
+void USART2_IRQHandler(void)
+{
+    uint32_t etat = ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->SR;
+    uint8_t octet;
+    uint8_t i;
+
+    if ((etat & (((uint16_t)0x0020) | ((uint16_t)0x0008) | ((uint16_t)0x0004) |
+                 ((uint16_t)0x0002) | ((uint16_t)0x0001))) == 0U)
+        return;
+    octet = (uint8_t)((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->DR;
+
+    if (etat & (((uint16_t)0x0008) | ((uint16_t)0x0004) | ((uint16_t)0x0002) | ((uint16_t)0x0001)))
+    {
+        MaeRcp = 0;
+        return;
     }
 
 
+    if (octet & 0x80U)
+    {
+        if (octet & 0x30U)
+        {
+            MaeRcp = 0;
+            return;
+        }
+        entete = octet;
+        MaeRcp = (octet & 0x40U) ? 1U : 5U;
+        return;
+    }
 
+    switch (MaeRcp)
+    {
+    case 1:
+    case 2:
+    case 3:
+    case 4:
+        octets_recus[MaeRcp - 1U] = Reception_Reconstituer(octet, MaeRcp - 1U);
+        if (MaeRcp == 4U)
+        {
+            for (i = 0; i < 4U; i++)
+                commande_casiers[i] = octets_recus[i];
+            casiers_prets = 1U;
+            MaeRcp = 0U;
+        }
+        else
+            MaeRcp++;
+        break;
 
-    ((SysTick_Type *) ((0xE000E000UL) + 0x0010UL) )->CTRL = 0U;
+    case 5:
+    case 6:
+    case 7:
+    case 8:
+        octets_recus[MaeRcp - 5U] = Reception_Reconstituer(octet, MaeRcp - 5U);
+        if (MaeRcp == 8U)
+        {
+            for (i = 0; i < 4U; i++)
+                commande_zif[i] = octets_recus[i];
+            zif_pret = 1U;
+            MaeRcp = 0U;
+        }
+        else
+            MaeRcp++;
+        break;
+
+    default:
+        MaeRcp = 0U;
+        break;
+    }
 }
 
+
+static uint8_t FIFO_AjouterReponse(uint8_t type, uint16_t valeur)
+{
+    uint8_t fort = (uint8_t)(valeur >> 8);
+    uint8_t faible = (uint8_t)valeur;
+    uint8_t message[3];
+    uint8_t i;
+
+    if (FifoLibre < 3U)
+        return 0;
+    message[0] = (uint8_t)(type | ((fort >> 7) & 1U) |
+                           (((faible >> 7) & 1U) << 1));
+    message[1] = fort & 0x7FU;
+    message[2] = faible & 0x7FU;
+
+    for (i = 0; i < 3U; i++)
+    {
+        Fifo[IwFifo] = message[i];
+        IwFifo = (uint8_t)((IwFifo + 1U) % 16U);
+        FifoLibre--;
+    }
+    return 1;
+}
+
+
+static void FIFO_Emettre(void)
+{
+    if (FifoLibre < 16U && (((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->SR & ((uint16_t)0x0080)))
+    {
+        ((USART_TypeDef *) (((uint32_t)0x40000000) + 0x4400))->DR = Fifo[IrFifo];
+        IrFifo = (uint8_t)((IrFifo + 1U) % 16U);
+        FifoLibre++;
+    }
+}
+void Allumer_Toutes_LEDs(uint8_t a_repeter)
+{
+    static int time = 1000;
+    static uint8_t cpt = 0;
+    while (cpt < a_repeter)
+    {
+        PCF_Ecrire(((0x2 << 4) | 0b000), 0b11111111);
+        PCF_Ecrire(((0x2 << 4) | 0b001), 0b11111111);
+        delay_ms(time);
+
+        PCF_Ecrire(((0x2 << 4) | 0b000), 0b10101010);
+        PCF_Ecrire(((0x2 << 4) | 0b001), 0b10101010);
+        delay_ms(time);
+        PCF_Ecrire(((0x2 << 4) | 0b000), 0b01010101);
+        PCF_Ecrire(((0x2 << 4) | 0b001), 0b01010101);
+        delay_ms(time);
+        cpt += 1;
+    }
+}
+void Maj_LEDs_Casiers(void)
+{
+    uint8_t capteurs;
+    uint8_t led0 = 0xFF;
+    uint8_t led1 = 0xFF;
+
+
+    if (!PCF_Lire(((0x2 << 4) | 0b011), &capteurs))
+        return;
+
+    for (uint8_t i = 0; i < 3; i++)
+    {
+
+        if (capteurs & (1U << i))
+            led0 &= ~(1U << (2 * i));
+        else
+            led0 &= ~(1U << (2 * i + 1));
+
+
+        if (capteurs & (1U << (i + 4)))
+            led1 &= ~(1U << (2 * i));
+        else
+            led1 &= ~(1U << (2 * i + 1));
+    }
+
+
+    PCF_Ecrire(((0x2 << 4) | 0b000), led0);
+    PCF_Ecrire(((0x2 << 4) | 0b001), led1);
+}
+# 576 "main.c"
 int main(void)
 {
-    GPIO_InitPin(((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800)), 5, GPIO_OUTPUT_PP_50MHZ, GPIO_LOW);
+    uint8_t demande_casiers[4];
+    uint8_t demande_zif[4];
+    uint8_t traiter_casiers;
+    uint8_t traiter_zif;
+    uint8_t i;
+    uint16_t directions;
+    uint16_t niveaux;
+    uint16_t lecture;
 
+    SystemCoreClockUpdate();
+
+    ZIF_Config(0xFFFFU, 0x0000U);
+    I2C_Init();
+    pcfs_initialises = Casiers_Initialiser();
+    UART_Init();
+    Allumer_Toutes_LEDs(1);
     while (1)
     {
-   static int time = 5000;
-        ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800))->BSRR = (1U << 5);
-        delay_ms(time);
+        traiter_casiers = 0;
+        traiter_zif = 0;
 
-        ((GPIO_TypeDef *) ((((uint32_t)0x40000000) + 0x10000) + 0x0800))->BRR = (1U << 5);
-        delay_ms(time);
+
+        __disable_irq();
+        if (casiers_prets)
+        {
+            for (i = 0; i < 4U; i++)
+                demande_casiers[i] = commande_casiers[i];
+            casiers_prets = 0U;
+            traiter_casiers = 1U;
+        }
+        if (zif_pret)
+        {
+            for (i = 0; i < 4U; i++)
+                demande_zif[i] = commande_zif[i];
+            zif_pret = 0U;
+            traiter_zif = 1U;
+        }
+        __enable_irq();
+
+        if (traiter_casiers)
+        {
+            uint16_t vertes = (uint16_t)(((uint16_t)demande_casiers[0] << 8) |
+                                         demande_casiers[1]);
+            uint16_t rouges = (uint16_t)(((uint16_t)demande_casiers[2] << 8) |
+                                         demande_casiers[3]);
+            if (Casiers_LEDs(vertes, rouges) && Casiers_Lire(&lecture))
+                (void)FIFO_AjouterReponse(0xC0U, lecture);
+        }
+
+        if (traiter_zif)
+        {
+            directions = (uint16_t)(((uint16_t)demande_zif[0] << 8) |
+                                    demande_zif[1]);
+            niveaux = (uint16_t)(((uint16_t)demande_zif[2] << 8) |
+                                 demande_zif[3]);
+            if (ZIF_DirectionsValides(directions))
+            {
+                ZIF_Config(directions, niveaux);
+                delay_us(20);
+                lecture = ZIF_Lire();
+                (void)FIFO_AjouterReponse(0x80U, lecture);
+            }
+            else
+            {
+                ZIF_Config(0xFFFFU, 0x0000U);
+
+            }
+        }
+
+        FIFO_Emettre();
     }
 }

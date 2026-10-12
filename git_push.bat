@@ -1,2 +1,2 @@
 echo off
-git status && git add . && git commit -m "Tout fonctionnelle avec version2" && git push
+git status && git add . && git commit -m "Trie du dossier" && git push
