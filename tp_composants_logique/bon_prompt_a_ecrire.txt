@@ -1,0 +1,106 @@
+Le prompt qui aurait ete parfait : 
+
+
+Je travaille sur un STM32F103RB avec Keil µVision.
+
+Je veux programmer les GPIO directement avec les registres, sans utiliser :
+- HAL
+- LL
+- les fonctions de la Standard Peripheral Library
+
+En revanche, j’ai le droit d’utiliser les définitions déjà présentes dans stm32f10x.h / CMSIS, par exemple :
+- GPIO_TypeDef
+- GPIOA, GPIOB, GPIOC...
+- RCC
+- RCC_APB2ENR_IOPAEN, RCC_APB2ENR_IOPBEN...
+- CRL, CRH, BSRR, BRR, IDR, ODR...
+
+Je ne veux donc PAS redéfinir manuellement les adresses mémoire des GPIO.
+
+Crée-moi une fonction générique :
+
+GPIO_InitPin(...)
+
+qui permet d’initialiser une seule broche GPIO.
+
+Je veux pouvoir l’appeler exactement de cette manière :
+
+GPIO_InitPin(GPIOB, 8, GPIO_OUTPUT_PP_50MHZ, GPIO_LOW);
+
+La fonction doit prendre en paramètres :
+1. le GPIO, par exemple GPIOA, GPIOB, GPIOC...
+2. le numéro de pin de 0 à 15
+3. la configuration de la pin
+4. son état initial
+
+Je veux définir les configurations avec des enum lisibles, par exemple :
+
+GPIO_INPUT_ANALOG
+GPIO_INPUT_FLOATING
+GPIO_INPUT_PULL
+GPIO_OUTPUT_PP_2MHZ
+GPIO_OUTPUT_PP_10MHZ
+GPIO_OUTPUT_PP_50MHZ
+GPIO_OUTPUT_OD_2MHZ
+GPIO_OUTPUT_OD_10MHZ
+GPIO_OUTPUT_OD_50MHZ
+GPIO_AF_PP_2MHZ
+GPIO_AF_PP_10MHZ
+GPIO_AF_PP_50MHZ
+GPIO_AF_OD_2MHZ
+GPIO_AF_OD_10MHZ
+GPIO_AF_OD_50MHZ
+
+Et :
+
+GPIO_LOW
+GPIO_HIGH
+
+La fonction doit :
+- vérifier que la pin est comprise entre 0 et 15
+- activer automatiquement l’horloge du GPIO dans RCC->APB2ENR
+- utiliser CRL pour les pins 0 à 7
+- utiliser CRH pour les pins 8 à 15
+- calculer automatiquement le décalage des 4 bits correspondant à la pin
+- effacer l’ancienne configuration avant d’écrire la nouvelle
+- utiliser BSRR/BRR pour définir l’état initial
+- permettre avec GPIO_INPUT_PULL + GPIO_HIGH d’avoir une entrée Pull-Up
+- permettre avec GPIO_INPUT_PULL + GPIO_LOW d’avoir une entrée Pull-Down
+
+Je veux uniquement du C compatible Keil pour STM32F103RB.
+
+Donne-moi :
+1. le code complet
+2. un exemple dans main()
+3. une explication de chaque partie importante
+4. aucune fonction HAL, LL ou StdPeriph.
+
+
+
+
+
+Voici le prompt :
+
+
+Je travaille sur un STM32F103RB dans l’environnement Keil µVision.
+
+Je souhaite créer une fonction d’initialisation GPIO permettant d’initialiser une broche d’un GPIO en lui donnant en paramètres :
+
+* le port GPIO, par exemple GPIOA, GPIOB, GPIOC, etc. ;
+* le numéro de la broche ;
+* sa configuration ;
+* son état par défaut.
+
+Je ne souhaite utiliser aucune fonction HAL, LL ou autre bibliothèque haut niveau. En revanche, je peux utiliser les définitions déjà présentes dans les bibliothèques STM32, comme `GPIO_TypeDef`, `GPIOA`, `GPIOB`, `RCC`, etc., afin de piloter directement les registres sans avoir à manipuler manuellement les adresses mémoire.
+
+Je souhaite pouvoir appeler la fonction de cette manière :
+
+`GPIO_InitPin(GPIOB, 8, GPIO_OUTPUT_PP_50MHZ, GPIO_LOW);`
+
+
+
+
+
+
+
+
