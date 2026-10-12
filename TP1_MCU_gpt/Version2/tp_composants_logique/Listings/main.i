@@ -2143,8 +2143,6 @@ static uint8_t Casiers_Initialiser(void)
 
     if (!PCF_Ecrire(((0x2 << 4) | 0b011), 0xFFU))
         ok = 0;
-    if (!PCF_Ecrire(0x25U, 0xFFU))
-        ok = 0;
     return ok;
 }
 
@@ -2385,24 +2383,78 @@ void Maj_LEDs_Casiers(void)
     PCF_Ecrire(((0x2 << 4) | 0b000), led0);
     PCF_Ecrire(((0x2 << 4) | 0b001), led1);
 }
-# 574 "main.c"
+# 575 "main.c"
 int main(void)
 {
+    uint8_t demande_casiers[4];
+    uint8_t demande_zif[4];
+    uint8_t traiter_casiers;
+    uint8_t traiter_zif;
+    uint8_t i;
+    uint16_t directions;
+    uint16_t niveaux;
+    uint16_t lecture;
+
     SystemCoreClockUpdate();
 
+    ZIF_Config(0xFFFFU, 0x0000U);
     I2C_Init();
-
-
-    PCF_Ecrire(((0x2 << 4) | 0b011), 0x00);
+    pcfs_initialises = Casiers_Initialiser();
+    UART_Init();
     Allumer_Toutes_LEDs(1);
-
-    PCF_Ecrire(((0x2 << 4) | 0b000), 0b11111111);
-    PCF_Ecrire(((0x2 << 4) | 0b001), 0b11111111);
-
     while (1)
     {
-        Maj_LEDs_Casiers();
+        traiter_casiers = 0;
+        traiter_zif = 0;
 
-        delay_ms(20);
+
+        __disable_irq();
+        if (casiers_prets)
+        {
+            for (i = 0; i < 4U; i++)
+                demande_casiers[i] = commande_casiers[i];
+            casiers_prets = 0U;
+            traiter_casiers = 1U;
+        }
+        if (zif_pret)
+        {
+            for (i = 0; i < 4U; i++)
+                demande_zif[i] = commande_zif[i];
+            zif_pret = 0U;
+            traiter_zif = 1U;
+        }
+        __enable_irq();
+
+        if (traiter_casiers)
+        {
+            uint16_t vertes = (uint16_t)(((uint16_t)demande_casiers[0] << 8) |
+                                         demande_casiers[1]);
+            uint16_t rouges = (uint16_t)(((uint16_t)demande_casiers[2] << 8) |
+                                         demande_casiers[3]);
+            if (Casiers_LEDs(vertes, rouges) && Casiers_Lire(&lecture))
+                (void)FIFO_AjouterReponse(0xC0U, lecture);
+        }
+
+        if (traiter_zif)
+        {
+            directions = (uint16_t)(((uint16_t)demande_zif[0] << 8) |
+                                    demande_zif[1]);
+            niveaux = (uint16_t)(((uint16_t)demande_zif[2] << 8) |
+                                 demande_zif[3]);
+            if (ZIF_DirectionsValides(directions))
+            {
+                ZIF_Config(directions, niveaux);
+                delay_us(20);
+                lecture = ZIF_Lire();
+                (void)FIFO_AjouterReponse(0x80U, lecture);
+            }
+            else
+            {
+                ZIF_Config(0xFFFFU, 0x0000U);
+
+            }
+        }
+
+        FIFO_Emettre();
     }
 }

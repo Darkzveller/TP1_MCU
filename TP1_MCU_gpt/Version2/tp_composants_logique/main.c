@@ -28,7 +28,6 @@
 #define PCF_LED_0 ((0x2 << 4) | 0b000)  // 0x24  /* LED 1 a 3 : bits P0 a P5 */
 #define PCF_LED_1 ((0x2 << 4) | 0b001)  // 0x20 /* LED 4 a 6 : bits P0 a P5 */
 #define PCF_REED_0 ((0x2 << 4) | 0b011) /* capteurs 0 a 7 */
-#define PCF_REED_1 0x25U                /* capteurs 8 a 15 */
 #define ROUGE_ALL_LED 0b10101010            // 0xAA
 #define VERT_ALL_LED 0b01010101             // 0x55
 #define ETEINT_ALL_LED 0b11111111           // 0xFF
@@ -356,15 +355,15 @@ static uint8_t Casiers_LEDs(uint16_t vertes, uint16_t rouges)
 /* Lecture brute : 1 = contact ouvert, 0 = contact vers la masse. */
 static uint8_t Casiers_Lire(uint16_t *etat)
 {
-    uint8_t bas, haut;
+    uint8_t bas;
+
     if (!PCF_Lire(PCF_REED_0, &bas))
         return 0;
-    if (!PCF_Lire(PCF_REED_1, &haut))
-        return 0;
-    *etat = (uint16_t)(((uint16_t)haut << 8) | bas);
+
+    *etat = (uint16_t)bas;
+
     return 1;
 }
-
 /* ------------------------ UART2 et protocole ------------------------ */
 static void UART_Init(void)
 {
@@ -555,112 +554,94 @@ void Maj_LEDs_Casiers(void)
 // {
 //     SystemCoreClockUpdate();
 
-//     // Initialisation de l'I2C logiciel
 //     I2C_Init();
 
-//     // Test : P0 = 0 et toutes les autres broches = 1
-//     // ack_led0 = PCF_Ecrire(PCF_LED_0, 0x00);
-//     // ack_led1 = PCF_Ecrire(PCF_LED_1, 0x00);
-//     PCF_Ecrire(PCF_LED_0, ETEINT_ALL_LED );
-//     PCF_Ecrire(PCF_LED_1, ETEINT_ALL_LED );
-
+//     // Configurer le PCF des capteurs en entree
+//     PCF_Ecrire(PCF_REED_0, 0x00);
 //     Allumer_Toutes_LEDs(1);
+//     // Eteindre les LED au demarrage
+//     PCF_Ecrire(PCF_LED_0, ETEINT_ALL_LED);
+//     PCF_Ecrire(PCF_LED_1, ETEINT_ALL_LED);
+
 //     while (1)
 //     {
+//         Maj_LEDs_Casiers();
+
+//         delay_ms(20);
 //     }
 // }
+// /* ------------------------ Programme principal ------------------------ */
 int main(void)
 {
+    uint8_t demande_casiers[4];
+    uint8_t demande_zif[4];
+    uint8_t traiter_casiers;
+    uint8_t traiter_zif;
+    uint8_t i;
+    uint16_t directions;
+    uint16_t niveaux;
+    uint16_t lecture;
+
     SystemCoreClockUpdate();
-
+    /* Securite : toutes les pattes ZIF en entree, tirage vers le bas. */
+    ZIF_Config(0xFFFFU, 0x0000U);
     I2C_Init();
-
-    // Configurer le PCF des capteurs en entree
-    PCF_Ecrire(PCF_REED_0, 0x00);
+    pcfs_initialises = Casiers_Initialiser(); /* 1 = 4 adresses ACK : 2 LED + 2 capteurs */
+    UART_Init();
     Allumer_Toutes_LEDs(1);
-    // Eteindre les LED au demarrage
-    PCF_Ecrire(PCF_LED_0, ETEINT_ALL_LED);
-    PCF_Ecrire(PCF_LED_1, ETEINT_ALL_LED);
-
     while (1)
     {
-        Maj_LEDs_Casiers();
+        traiter_casiers = 0;
+        traiter_zif = 0;
 
-        delay_ms(20);
+        /* Copie atomique des commandes preparees par l'interruption. */
+        __disable_irq();
+        if (casiers_prets)
+        {
+            for (i = 0; i < 4U; i++)
+                demande_casiers[i] = commande_casiers[i];
+            casiers_prets = 0U;
+            traiter_casiers = 1U;
+        }
+        if (zif_pret)
+        {
+            for (i = 0; i < 4U; i++)
+                demande_zif[i] = commande_zif[i];
+            zif_pret = 0U;
+            traiter_zif = 1U;
+        }
+        __enable_irq();
+
+        if (traiter_casiers)
+        {
+            uint16_t vertes = (uint16_t)(((uint16_t)demande_casiers[0] << 8) |
+                                         demande_casiers[1]);
+            uint16_t rouges = (uint16_t)(((uint16_t)demande_casiers[2] << 8) |
+                                         demande_casiers[3]);
+            if (Casiers_LEDs(vertes, rouges) && Casiers_Lire(&lecture))
+                (void)FIFO_AjouterReponse(0xC0U, lecture);
+        }
+
+        if (traiter_zif)
+        {
+            directions = (uint16_t)(((uint16_t)demande_zif[0] << 8) |
+                                    demande_zif[1]);
+            niveaux = (uint16_t)(((uint16_t)demande_zif[2] << 8) |
+                                 demande_zif[3]);
+            if (ZIF_DirectionsValides(directions))
+            {
+                ZIF_Config(directions, niveaux);
+                delay_us(20);
+                lecture = ZIF_Lire();
+                (void)FIFO_AjouterReponse(0x80U, lecture);
+            }
+            else
+            {
+                ZIF_Config(0xFFFFU, 0x0000U); /* repli securise */
+                /* Aucun message d'erreur n'est defini dans l'enonce. */
+            }
+        }
+
+        FIFO_Emettre();
     }
 }
-// /* ------------------------ Programme principal ------------------------ */
-// int main(void)
-// {
-//     uint8_t demande_casiers[4];
-//     uint8_t demande_zif[4];
-//     uint8_t traiter_casiers;
-//     uint8_t traiter_zif;
-//     uint8_t i;
-//     uint16_t directions;
-//     uint16_t niveaux;
-//     uint16_t lecture;
-
-//     SystemCoreClockUpdate();
-//     /* Securite : toutes les pattes ZIF en entree, tirage vers le bas. */
-//     ZIF_Config(0xFFFFU, 0x0000U);
-//     I2C_Init();
-//     pcfs_initialises = Casiers_Initialiser(); /* 1 = 4 adresses ACK : 2 LED + 2 capteurs */
-//     UART_Init();
-//     Allumer_Toutes_LEDs(1);
-//     while (1)
-//     {
-//         traiter_casiers = 0;
-//         traiter_zif = 0;
-
-//         /* Copie atomique des commandes preparees par l'interruption. */
-//         __disable_irq();
-//         if (casiers_prets)
-//         {
-//             for (i = 0; i < 4U; i++)
-//                 demande_casiers[i] = commande_casiers[i];
-//             casiers_prets = 0U;
-//             traiter_casiers = 1U;
-//         }
-//         if (zif_pret)
-//         {
-//             for (i = 0; i < 4U; i++)
-//                 demande_zif[i] = commande_zif[i];
-//             zif_pret = 0U;
-//             traiter_zif = 1U;
-//         }
-//         __enable_irq();
-
-//         if (traiter_casiers)
-//         {
-//             uint16_t vertes = (uint16_t)(((uint16_t)demande_casiers[0] << 8) |
-//                                          demande_casiers[1]);
-//             uint16_t rouges = (uint16_t)(((uint16_t)demande_casiers[2] << 8) |
-//                                          demande_casiers[3]);
-//             if (Casiers_LEDs(vertes, rouges) && Casiers_Lire(&lecture))
-//                 (void)FIFO_AjouterReponse(0xC0U, lecture);
-//         }
-
-//         if (traiter_zif)
-//         {
-//             directions = (uint16_t)(((uint16_t)demande_zif[0] << 8) |
-//                                     demande_zif[1]);
-//             niveaux = (uint16_t)(((uint16_t)demande_zif[2] << 8) |
-//                                  demande_zif[3]);
-//             if (ZIF_DirectionsValides(directions))
-//             {
-//                 ZIF_Config(directions, niveaux);
-//                 delay_us(20);
-//                 lecture = ZIF_Lire();
-//                 (void)FIFO_AjouterReponse(0x80U, lecture);
-//             }
-//             else
-//             {
-//                 ZIF_Config(0xFFFFU, 0x0000U); /* repli securise */
-//                 /* Aucun message d'erreur n'est defini dans l'enonce. */
-//             }
-//         }
-
-//         FIFO_Emettre();
-//     }
-// }
