@@ -24,6 +24,8 @@
 #define CLK_PCF (1U << SCL_PIN)
 #define SDA_PCF (1U << SDA_PIN)
 
+#define PULL_UP_REED_PCF    0b11111111  // 0xFF
+#define PULL_DOWN_REED_PCF  0b00000000  // 0x00
 /* Adresses 7 bits PROPOSEES ; verifier les broches A0, A1, A2. */
 #define PCF_LED_0 ((0x2 << 4) | 0b000)  // 0x24  /* LED 1 a 3 : bits P0 a P5 */
 #define PCF_LED_1 ((0x2 << 4) | 0b001)  // 0x20 /* LED 4 a 6 : bits P0 a P5 */
@@ -307,7 +309,7 @@ static uint8_t Casiers_Initialiser(void)
             ok = 0; /* LEDs eteintes */
 
     /* Capteurs : ecrire 1 sur tous les bits = entree avec pull-up. */
-    if (!PCF_Ecrire(PCF_REED_0, 0xFFU))
+    if (!PCF_Ecrire(PCF_REED_0, PULL_UP_REED_PCF))
         ok = 0;
     return ok;
 }
@@ -557,7 +559,7 @@ void Maj_LEDs_Casiers(void)
 //     I2C_Init();
 
 //     // Configurer le PCF des capteurs en entree
-//     PCF_Ecrire(PCF_REED_0, 0x00);
+//     PCF_Ecrire(PCF_REED_0, PULL_UP_REED_PCF);
 //     Allumer_Toutes_LEDs(1);
 //     // Eteindre les LED au demarrage
 //     PCF_Ecrire(PCF_LED_0, ETEINT_ALL_LED);

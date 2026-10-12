@@ -19,12 +19,20 @@ int[] tableau_capteur = new int[16];
 
 int INOUT = 0x7FBF;   // = 0b0111111110111111// 16 bits
 int PULL  = 0x8000;   // = 0b1000000000000000 // 16 bits
-int val;
+// Etats renvoyes par le STM32 (reponses de 3 octets du TP).
+int lectureZIF = 0;
+boolean zifRecu = false;
+int etatReception = 0;    // 0: attente d'entete, 1: octet fort, 2: octet faible
+int enteteReception = 0;
+int octetFort = 0;
 PFont font;
 Serial my_port;
 
-void setup() {
+void settings() {
   size(LARGEUR, HAUTEUR);
+}
+
+void setup() {
   background(0);
   font = createFont("Arial", 16);
   textFont(font);
@@ -32,12 +40,16 @@ void setup() {
   for (int i = 0; i < 16; i++) {
     led_rouge[i] = 0;
     led_verte[i] = 0;
-    tableau_capteur[i] = int(random(2)); // Valeurs aléatoires pour le test
+    tableau_capteur[i] = -1; // Etat inconnu tant que le STM32 ne repond pas
   }
-  // my_port série
+  // USART2 : 9600 bauds, 8 bits, pas de parite, 1 bit de stop.
   printArray(Serial.list());
-  // Remplace "COM3" par le my_port série correct
-  my_port = new Serial(this, Serial.list()[0], 9600);
+  // Adapter l'index si la carte NUCLEO n'est pas le premier port.
+  if (Serial.list().length > 0) {
+    my_port = new Serial(this, Serial.list()[0], 9600);
+  } else {
+    println("Aucun port serie disponible.");
+  }
 }
 
 
@@ -52,9 +64,17 @@ void draw() {
    text("cliquez sur les PINs pour changer leur état", 600, 500);
    text("cliquez sur 'Z' pour envoyer la trame ZIF16", 600, 530);
 
-  while ( my_port.available() > 0) {  // If data is available,
-    val = my_port.read();         // read it and store it in val
-    println(val);
+  if (zifRecu) {
+    fill(255);
+    textAlign(LEFT, BASELINE);
+    text("ZIF16 lu : 0x" + hex(lectureZIF, 4), 550, 565);
+  }
+
+  // Les reponses du STM32 arrivent en trames de 3 octets.
+  if (my_port != null) {
+    while (my_port.available() > 0) {
+      recevoirOctet(my_port.read());
+    }
   }
 }
 
@@ -184,6 +204,7 @@ void togglePinBits(int pinNum) {
 
 // Envoi trame avec touche Z ou z
 void keyPressed() {
+  if (my_port == null) return;
   if (key == 'c' || key == 'C') {
     sendTrameLED();
   }
@@ -193,14 +214,19 @@ void keyPressed() {
 }
 
 void sendTrameDIL() {
+  // Le TP ne prevoit que deux sorties fortes pour alimenter le circuit.
+  if (Integer.bitCount((~INOUT) & 0xFFFF) > 2) {
+    println("Erreur ZIF16 : plus de deux sorties fortes configurees.");
+    return;
+  }
   int[] trame = new int[5];
 
-  // Octet 1 : entête 128 + bits manquants
-  trame[0] = 128;
-  trame[0] += ((INOUT >> 15) & 1) << 3;
-  trame[0] += ((INOUT >> 7) & 1) << 2;
-  trame[0] += ((PULL >> 15) & 1) << 1;
-  trame[0] += ((PULL >> 7) & 1);
+  // Entete 0x80. Bits 0..3 = bits 7 des quatre octets suivants.
+  trame[0] = 0x80;
+  trame[0] |= ((INOUT >> 15) & 1);       // b7 de l'octet 1 (PB15)
+  trame[0] |= ((INOUT >> 7) & 1) << 1;   // b7 de l'octet 2 (PC7)
+  trame[0] |= ((PULL >> 15) & 1) << 2;   // b7 de l'octet 3 (PB15)
+  trame[0] |= ((PULL >> 7) & 1) << 3;    // b7 de l'octet 4 (PC7)
 
   // Octet 2 : (INOUT >> 8) & 127
   trame[1] = (INOUT >> 8) & 0x7F;
@@ -262,15 +288,17 @@ void drawUI() {
     // Texte 0 ou F
     fill(0);
     textAlign(CENTER, CENTER);
-    text(tableau_capteur[i] == 0 ? "0" : "F", x + RECT_W / 2, y-2 + RECT_H / 2);
+    String valeurCapteur = tableau_capteur[i] < 0 ? "?" : str(tableau_capteur[i]);
+    text(valeurCapteur, x + RECT_W / 2, y-2 + RECT_H / 2);
   }
 }
 
 void sendTrameLED() {
   int[] trame = new int[5];
   
-  // Octet 1 : 192 + 8*led_rouge[7] + 4*led_rouge[15] + 2*led_verte[7] + led_verte[15]
-  trame[0] = 192 + 8 * led_rouge[7] + 4 * led_rouge[15] + 2 * led_verte[7] + led_verte[15];
+  // Entete 0xC0 : bits 0..3 = bits 7 des quatre octets suivants.
+  trame[0] = 0xC0 | led_verte[15] | (led_verte[7] << 1)
+            | (led_rouge[15] << 2) | (led_rouge[7] << 3);
 
   // Octet 2 : led_verte[14 à 8]
   trame[1] = 0;
@@ -304,3 +332,50 @@ void sendTrameLED() {
 //  println("Trame envoyée : " + Arrays.toString(trame));
 }
 
+
+// Reception des reponses de 3 octets prevues par le TP.
+// Seul l'entete a son bit 7 a 1. Les bits 0 et 1 de
+// l'entete contiennent les bits 7 des deux octets de donnees.
+void recevoirOctet(int octet) {
+  octet &= 0xFF;
+
+  // Nouvelle entete : resynchronisation, meme au milieu d'une trame.
+  if ((octet & 0x80) != 0) {
+    if ((octet & 0x30) != 0) {
+      etatReception = 0; // entete invalide
+      return;
+    }
+    enteteReception = octet;
+    etatReception = 1;
+    return;
+  }
+
+  switch (etatReception) {
+  case 0: // Attente d'une entete
+    break;
+
+  case 1: // Octet de poids fort
+    octetFort = (octet & 0x7F) | ((enteteReception & 1) << 7);
+    etatReception = 2;
+    break;
+
+  case 2: // Octet de poids faible : message complet
+    int octetFaible = (octet & 0x7F) | ((enteteReception & 2) << 6);
+    int valeur = (octetFort << 8) | octetFaible;
+    etatReception = 0;
+
+    if ((enteteReception & 0x40) != 0) {
+      // Reponse casiers : etat des 16 capteurs, bit i = casier i.
+      for (int i = 0; i < 16; i++) {
+        tableau_capteur[i] = (valeur >> i) & 1;
+      }
+      println("Reponse casiers : 0x" + hex(valeur, 4));
+    } else {
+      // Reponse ZIF16 : etat des 16 broches, bit i = patte i+1.
+      lectureZIF = valeur;
+      zifRecu = true;
+      println("Reponse ZIF16 : 0x" + hex(valeur, 4));
+    }
+    break;
+  }
+}

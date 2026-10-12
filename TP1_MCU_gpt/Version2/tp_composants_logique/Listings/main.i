@@ -1865,7 +1865,7 @@ typedef struct
   volatile uint32_t SR;
 } WWDG_TypeDef;
 # 12 "main.c" 2
-# 36 "main.c"
+# 37 "main.c"
 typedef enum
 {
     GPIO_INPUT_ANALOG = 0x0,
@@ -2141,7 +2141,7 @@ static uint8_t Casiers_Initialiser(void)
             ok = 0;
 
 
-    if (!PCF_Ecrire(((0x2 << 4) | 0b011), 0xFFU))
+    if (!PCF_Ecrire(((0x2 << 4) | 0b011), 0b11111111))
         ok = 0;
     return ok;
 }
@@ -2189,15 +2189,15 @@ static uint8_t Casiers_LEDs(uint16_t vertes, uint16_t rouges)
 
 static uint8_t Casiers_Lire(uint16_t *etat)
 {
-    uint8_t bas, haut;
+    uint8_t bas;
+
     if (!PCF_Lire(((0x2 << 4) | 0b011), &bas))
         return 0;
-    if (!PCF_Lire(0x25U, &haut))
-        return 0;
-    *etat = (uint16_t)(((uint16_t)haut << 8) | bas);
+
+    *etat = (uint16_t)bas;
+
     return 1;
 }
-
 
 static void UART_Init(void)
 {
@@ -2383,7 +2383,7 @@ void Maj_LEDs_Casiers(void)
     PCF_Ecrire(((0x2 << 4) | 0b000), led0);
     PCF_Ecrire(((0x2 << 4) | 0b001), led1);
 }
-# 575 "main.c"
+# 576 "main.c"
 int main(void)
 {
     uint8_t demande_casiers[4];
